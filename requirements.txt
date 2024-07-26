@@ -1,3 +1,11 @@
 streamlit
 pandas
 plotly
+numpy
+rdkit
+pandas
+tqdm
+prolif
+MDAnalysis
+pathlib
+ipywidgets
