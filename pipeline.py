@@ -101,7 +101,7 @@ def residue_score_distance(site1, site2, distancetype):
 subset = all_binding_sites[:100]
 distance_matrix_scores = pairwise_distances_with_library(subset, residue_score_distance, distancetype)
 
-# BAsed on distance vectors
+# Based on distance vectors
 
 # def distance_vectors(binding sites):
 
@@ -125,9 +125,18 @@ def meanshift_cluster(distance_matrix):
     return mean_shift_labels
 
 # DBSCAN
+def dbscan_cluster(distance_matrix):
+    dbscan = DBSCAN(metric='precomputed', eps=0.5, min_samples=2)
+    dbscan_labels = dbscan.fit_predict(distance_matrix)
+    return dbscan_labels
 
 # OPTICS
+def optics_cluster(distance_matrix):
+    optics = OPTICS(metric='precomputed', min_samples=5, xi=0.05, min_cluster_size=0.1)
+    optics_labels = optics.fit_predict(distance_matrix)
+    return optics_labels
 
+# Step 3: Output of clusters and binding sites mapped to clusters
 
 
 
