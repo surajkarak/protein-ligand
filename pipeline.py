@@ -1,3 +1,5 @@
+import argparse
+from pathlib import Path
 import pandas as pd
 import json
 import random
@@ -99,45 +101,165 @@ def residue_score_distance(site1, site2, distancetype):
     return dist
 
 subset = all_binding_sites[:100]
-distance_matrix_scores = pairwise_distances_with_library(subset, residue_score_distance, distancetype)
+distance_matrix_scores = pairwise_distances_with_library(subset, residue_score_distance)
 
 # Based on distance vectors
 
 # def distance_vectors(binding sites):
 
+def get_residue_coordinates(binding_site, target_data):
+    residues = binding_site.get('residues', [])
+    target_residues = {
+        (chain, res_id, res_name): coord 
+        for chain, res_id, res_name, coord in zip(
+            target_data.get('chain_ids', []),
+            target_data.get('res_ids', []),
+            target_data.get('res_names', []),
+            target_data.get('coords', [])
+        )
+    }
+    
+    # Extract coordinates for residues in the binding site
+    residue_coords = []
+    for residue in residues:
+        chain_id, res_id, res_name = residue.split('_')  # Assuming residue is in "chain_resid_name" format
+        coord = target_residues.get((chain_id, int(res_id), res_name))
+        if coord is not None:
+            residue_coords.append(coord)
+    return np.array(residue_coords)
+
+
+def distance_vector(binding_site_entry):
+    file_name = binding_site_entry['file']  # Identify the file source
+    binding_site = binding_site_entry['site']
+    subset_target_data = [entry for entry in all_target_data if entry['file'] in file_name]
+    target_entry = next((entry for entry in subset_target_data if entry['file'] == file_name), None)
+
+    # Extract residue coordinates
+    residue_coords = get_residue_coordinates(binding_site, target_entry['target'])
+
+    # Extract hotspot coordinates
+    hotspots = binding_site.get('hotspots', [])
+    hotspot_coords = np.array([hotspot['center'] for hotspot in hotspots])
+
+    if residue_coords.size == 0 or hotspot_coords.size == 0:
+        return None  # No valid distances if either is empty
+
+    # Compute pairwise distances (rows: hotspots, columns: residues)
+    pairwise_distances = cdist(residue_coords, hotspot_coords, metric="euclidean")
+    min_distances = np.min(pairwise_distances, axis=1)
+    max_dist = 8.
+    vectors = 1 - np.clip(min_distances / max_dist, 0, 1)
+    return vectors
+
+def get_distance_between(site1, site2):
+    d1 = distance_vector(site1)
+    d2 = distance_vector(site2)
+    max_length = max(len(d1), len(d2))
+    vector1_padded = np.pad(d1, (0, max_length - len(d1)), mode='constant')
+    vector2_padded = np.pad(d2, (0, max_length - len(d2)), mode='constant')
+
+    distance = np.linalg.norm(vector1_padded - vector2_padded)
+    return distance
+
+
+subset = all_binding_sites[:100]  # First 100 sites
+distance_matrix = pairwise_distances_with_library(subset, get_distance_between)
+
 # Step 2: Clustering
-# Output to include 2D t-SNE visualizations and cluster labels for binding sites
 
-# Agglomerative
-
-def agglom_cluster(distance_matrix):
-    linkage_matrix = linkage(squareform(distance_matrix), method='average')
-    clusters = fcluster(linkage_matrix, t=0.5, criterion='distance')
-    agglom_model = AgglomerativeClustering(n_clusters=13, metric='precomputed', linkage='average')
-    cluster_labels = agglom_model.fit_predict(distance_matrix)
-    return cluster_labels
-
-
-# MeanShift
-def meanshift_cluster(distance_matrix):
-    mean_shift = MeanShift()
-    mean_shift_labels = mean_shift.fit_predict(distance_matrix)
-    return mean_shift_labels
-
-# DBSCAN
-def dbscan_cluster(distance_matrix):
-    dbscan = DBSCAN(metric='precomputed', eps=0.5, min_samples=2)
-    dbscan_labels = dbscan.fit_predict(distance_matrix)
-    return dbscan_labels
-
-# OPTICS
-def optics_cluster(distance_matrix):
-    optics = OPTICS(metric='precomputed', min_samples=5, xi=0.05, min_cluster_size=0.1)
-    optics_labels = optics.fit_predict(distance_matrix)
-    return optics_labels
+def perform_clustering(distance_matrix, clustering_model):
+    """Perform clustering based on the specified clustering model."""
+    if clustering_model == 'Agglomerative':
+        linkage_matrix = linkage(squareform(distance_matrix), method='average')
+        clusters = fcluster(linkage_matrix, t=0.5, criterion='distance')
+        agglom_model = AgglomerativeClustering(n_clusters=13, metric='precomputed', linkage='average')
+        cluster_labels = agglom_model.fit_predict(distance_matrix)
+        return cluster_labels
+    elif clustering_model == 'MeanShift':
+        mean_shift = MeanShift()
+        mean_shift_labels = mean_shift.fit_predict(distance_matrix)
+        return mean_shift_labels
+    elif clustering_model == 'DBSCAN':
+        dbscan = DBSCAN(metric='precomputed', eps=0.5, min_samples=2)
+        dbscan_labels = dbscan.fit_predict(distance_matrix)
+        return dbscan_labels
+    elif clustering_model == 'OPTICS':
+        optics = OPTICS(metric='precomputed', min_samples=5, xi=0.05, min_cluster_size=0.1)
+        optics_labels = optics.fit_predict(distance_matrix)
+        return optics_labels
+    else:
+        raise ValueError(f"Unsupported clustering model: {clustering_model}")
+    
 
 # Step 3: Output of clusters and binding sites mapped to clusters
 
+def mapping(subset, labels):
+    labels = [int(label) for label in labels]
+    subset_with_labels = [
+        {"residues": site.get("residues", []), "cluster_label": label}
+        for site, label in zip(subset, labels)
+    ]
+
+    output_file = "subset_with_labels.json"
+    with open(output_file, "w") as f:
+        json.dump(subset_with_labels, f, indent=4)
+
+    print(f"Subset with cluster labels saved to {output_file}")
 
 
 
+
+def cluster(json_path):
+    """
+    Main core function to execute the clustering
+    $ python viz.py --folder_path /Users/surajkwork/Documents/Projects/ProteinLigand/path_to_json
+
+    """
+    # Get attributes from JSON file
+
+    if not os.path.exists(json_path):
+        raise FileNotFoundError(f"The file {json_path} does not exist.")
+
+    # Load the JSON file
+    with open(json_path, 'r') as file:
+        config = json.load(file)
+
+    # path_to_PDB_files = config.get("path_to_PDB_files")
+    # box_size = config.get("box_size")
+    # ligand_name = config.get("ligand_name")
+    # ligand_path = config.get("ligand_path")
+    # columns = config.get("columns")
+    # group_ids = config.get("group_ids")
+    # smooth_distribution = config.get("smooth_distribution")
+    # smooth_tolerance = config.get("smooth_tolerance")
+    # bin_size = config.get("bin_size")
+    # n_bins = config.get("n_bins")
+    # range_values = config.get("range")
+    # merge_distributions = config.get("merge_distributions")
+    # sliding_window = config.get("sliding_window")
+    folder_path =  config.get("path_to_pkl_files"): "/Users/surajkwork/Documents/Projects/ProteinLigand/protein-ligand/protein-ligand/BindingSiteAnalysis/kras_md_sites_1",
+    subset = config.get("subset_to_analyse")
+    distance_metric = config.get("distance_metric")
+    clustering_model = config.get("clustering_model")
+    # "distance_type": "euclidean"
+
+    all_binding_sites = extraction(folder_path)
+    if subset:
+        binding_sites = [site for site in all_binding_sites if subset in site['file']]
+    else:
+        binding_sites = all_binding_sites
+    
+    distance_matrix = pairwise_distances_with_library(binding_sites, distance_metric)
+    labels = perform_clustering(distance_matrix, clustering_model)
+    mapping(binding_sites, labels)
+
+
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Cluster binding sites from PKL files (frames)")
+    parser.add_argument('--json_path', type=Path, help="Path to the folder containing the JSON files with the parameters")
+    args = parser.parse_args()
+    print(f"Folder Path: {args.json_path}") 
+    cluster(args.json_path)
