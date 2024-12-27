@@ -11,6 +11,7 @@ import seaborn as sns
 import numpy as np
 import pickle
 from sklearn.metrics import jaccard_score
+from scipy.spatial.distance import cdist
 from scipy.spatial.distance import pdist, squareform
 from scipy.cluster.hierarchy import linkage, dendrogram, fcluster
 from sklearn.cluster import AgglomerativeClustering
@@ -21,11 +22,13 @@ from sklearn.manifold import TSNE
 
 
 
-folder_path = '/Users/surajkwork/Documents/Projects/ProteinLigand/protein-ligand/protein-ligand/BindingSiteAnalysis/kras_md_sites_1'   
-all_binding_sites = []
-all_target_data = []
+# folder_path = '/Users/surajkwork/Documents/Projects/ProteinLigand/protein-ligand/protein-ligand/BindingSiteAnalysis/kras_md_sites_1'   
+# all_binding_sites = []
+
 
 def extraction(folder_path):
+    all_binding_sites = []
+    all_target_data = []
 
     for file_name in sorted(os.listdir(folder_path)):   
         if file_name.endswith('.pkl'):   
@@ -46,7 +49,7 @@ def extraction(folder_path):
             except Exception as e:
                 print(f"Error loading {file_name}: {e}")
 
-    # print(f"Total binding sites extracted: {len(all_binding_sites)}")
+    return all_binding_sites, all_target_data
     # print(f"Total target data entries extracted: {len(all_target_data)}")
 
 
@@ -54,54 +57,70 @@ def extraction(folder_path):
 
 # Based on residue set intersections
 
-def residue_overlap_distance(site1, site2, distancetype):
-    residues1 = set(site1.get('residues', []))
-    residues2 = set(site2.get('residues', []))
+def residue_overlap_distance(site1, site2, norm_by):
+    residues1 = set(site1["site"].get('residues', []))
+    residues2 = set(site2["site"].get('residues', []))
     
     if not residues1 or not residues2: 
         return 1.0 
     
-    # Jaccard distance = 1 - Jaccard similarity
-    return 1 - len(residues1 & residues2) / len(residues1 | residues2)
+    inter = len(residues1 & residues2)
+    union = len(residues1 | residues2)
 
-def pairwise_distances_with_library(sites, distance_func, distancetype):
+    # norm by average
+    if norm_by == "average":
+        sim = 2 * inter / (len(residues1) * len(residues2))
+    # norm by max
+    if norm_by == "max":
+        sim = inter / max(len(residues1), len(residues2))
+    # norm by min
+    if norm_by == "min":
+        sim = inter / min(len(residues1), len(residues2))
+    # norm by union
+    if norm_by == "union":
+        sim = inter / union
+    # distance can be calculated as inverse
+    dist = 1 - sim
+    return dist
+
+    # # Jaccard distance = 1 - Jaccard similarity
+    # return 1 - len(residues1 & residues2) / len(residues1 | residues2)
+
+def pairwise_distances_with_library(sites, distance_func, norm_by):
     def distance_wrapper(i, j):
-        return distance_func(sites[int(i[0])], sites[int(j[0])], distancetype)
+        return distance_func(sites[int(i[0])], sites[int(j[0])], norm_by)
     
     indices = list(range(len(sites)))
     condensed_matrix = pdist([[i] for i in indices], metric=lambda i, j: distance_wrapper(i, j))
     
     return squareform(condensed_matrix)
 
-subset = all_binding_sites[:100]  # First 100 sites
-distance_matrix = pairwise_distances_with_library(subset, residue_overlap_distance)
 
 # Based on residue scores
 
-def residue_score_distance(site1, site2, distancetype):
-    res_scores_1 = site1.get('residue_scores', {})
-    res_scores_2 = site2.get('residue_scores', {})
+def residue_score_distance(site1, site2):
+    res_scores_1 = site1["site"].get('residue_scores', {})
+    res_scores_2 = site2["site"].get('residue_scores', {})
     rnames = list(set.union(set(res_scores_1.keys()), set(res_scores_2.keys())))
     res_scores_1 = {**dict.fromkeys(rnames, 0), **res_scores_1}
     res_scores_2 = {**dict.fromkeys(rnames, 0), **res_scores_2}
     res_scores_1 = np.asarray(list(res_scores_1.values()), np.float32)
     res_scores_2 = np.asarray(list(res_scores_2.values()), np.float32)
-    
-    if distancetype == "euclidean":
-        dist = np.sqrt(np.sum((res_scores_1 - res_scores_2) ** 2))
-        sim = 1 - dist
-    if distancetype =="L1":
-        dist = np.sum(np.abs(res_scores_1 - res_scores_2))
-    if distancetype =="Jaccard":
-        min_sum = np.sum(np.minimum(res_scores_1, res_scores_2))
-        max_sum = np.sum(np.maximum(res_scores_1, res_scores_2))
-        sim = min_sum / max_sum
-        dist = 1 - sim
+    dist = np.sqrt(np.sum((res_scores_1 - res_scores_2) ** 2))
+
+    # if distancetype == "euclidean":
+    #     dist = np.sqrt(np.sum((res_scores_1 - res_scores_2) ** 2))
+    #     sim = 1 - dist
+    # if distancetype =="L1":
+    #     dist = np.sum(np.abs(res_scores_1 - res_scores_2))
+    # if distancetype =="Jaccard":
+    #     min_sum = np.sum(np.minimum(res_scores_1, res_scores_2))
+    #     max_sum = np.sum(np.maximum(res_scores_1, res_scores_2))
+    #     sim = min_sum / max_sum
+    #     dist = 1 - sim
     
     return dist
 
-subset = all_binding_sites[:100]
-distance_matrix_scores = pairwise_distances_with_library(subset, residue_score_distance)
 
 # Based on distance vectors
 
@@ -129,7 +148,7 @@ def get_residue_coordinates(binding_site, target_data):
     return np.array(residue_coords)
 
 
-def distance_vector(binding_site_entry):
+def hotspot_to_residue(binding_site_entry):
     file_name = binding_site_entry['file']  # Identify the file source
     binding_site = binding_site_entry['site']
     subset_target_data = [entry for entry in all_target_data if entry['file'] in file_name]
@@ -152,9 +171,9 @@ def distance_vector(binding_site_entry):
     vectors = 1 - np.clip(min_distances / max_dist, 0, 1)
     return vectors
 
-def get_distance_between(site1, site2):
-    d1 = distance_vector(site1)
-    d2 = distance_vector(site2)
+def distance_vector(site1, site2):
+    d1 = hotspot_to_residue(site1)
+    d2 = hotspot_to_residue(site2)
     max_length = max(len(d1), len(d2))
     vector1_padded = np.pad(d1, (0, max_length - len(d1)), mode='constant')
     vector2_padded = np.pad(d2, (0, max_length - len(d2)), mode='constant')
@@ -163,28 +182,31 @@ def get_distance_between(site1, site2):
     return distance
 
 
-subset = all_binding_sites[:100]  # First 100 sites
-distance_matrix = pairwise_distances_with_library(subset, get_distance_between)
+# subset = all_binding_sites[:100]  # First 100 sites
+# distance_matrix = pairwise_distances_with_library(subset, distance_vector)
+
+
+    
 
 # Step 2: Clustering
 
 def perform_clustering(distance_matrix, clustering_model):
     """Perform clustering based on the specified clustering model."""
-    if clustering_model == 'Agglomerative':
+    if clustering_model == 'agglomerative':
         linkage_matrix = linkage(squareform(distance_matrix), method='average')
         clusters = fcluster(linkage_matrix, t=0.5, criterion='distance')
-        agglom_model = AgglomerativeClustering(n_clusters=13, metric='precomputed', linkage='average')
+        agglom_model = AgglomerativeClustering(n_clusters=len(clusters), metric='precomputed', linkage='average')
         cluster_labels = agglom_model.fit_predict(distance_matrix)
         return cluster_labels
-    elif clustering_model == 'MeanShift':
+    elif clustering_model == 'meanshift':
         mean_shift = MeanShift()
         mean_shift_labels = mean_shift.fit_predict(distance_matrix)
         return mean_shift_labels
-    elif clustering_model == 'DBSCAN':
+    elif clustering_model == 'dbscan':
         dbscan = DBSCAN(metric='precomputed', eps=0.5, min_samples=2)
         dbscan_labels = dbscan.fit_predict(distance_matrix)
         return dbscan_labels
-    elif clustering_model == 'OPTICS':
+    elif clustering_model == 'optics':
         optics = OPTICS(metric='precomputed', min_samples=5, xi=0.05, min_cluster_size=0.1)
         optics_labels = optics.fit_predict(distance_matrix)
         return optics_labels
@@ -197,15 +219,15 @@ def perform_clustering(distance_matrix, clustering_model):
 def mapping(subset, labels):
     labels = [int(label) for label in labels]
     subset_with_labels = [
-        {"residues": site.get("residues", []), "cluster_label": label}
+        {"residues": site["site"].get("residues", []), "cluster_label": label}
         for site, label in zip(subset, labels)
     ]
 
-    output_file = "subset_with_labels.json"
+    output_file = "bindingsites_with_labels.json"
     with open(output_file, "w") as f:
         json.dump(subset_with_labels, f, indent=4)
 
-    print(f"Subset with cluster labels saved to {output_file}")
+    print(f"Binging sites with cluster labels saved to {output_file}")
 
 
 
@@ -225,35 +247,35 @@ def cluster(json_path):
     with open(json_path, 'r') as file:
         config = json.load(file)
 
-    # path_to_PDB_files = config.get("path_to_PDB_files")
-    # box_size = config.get("box_size")
-    # ligand_name = config.get("ligand_name")
-    # ligand_path = config.get("ligand_path")
-    # columns = config.get("columns")
-    # group_ids = config.get("group_ids")
-    # smooth_distribution = config.get("smooth_distribution")
-    # smooth_tolerance = config.get("smooth_tolerance")
-    # bin_size = config.get("bin_size")
-    # n_bins = config.get("n_bins")
-    # range_values = config.get("range")
-    # merge_distributions = config.get("merge_distributions")
-    # sliding_window = config.get("sliding_window")
-    folder_path =  config.get("path_to_pkl_files"): "/Users/surajkwork/Documents/Projects/ProteinLigand/protein-ligand/protein-ligand/BindingSiteAnalysis/kras_md_sites_1",
+    folder_path =  config.get("path_to_pkl_files") 
     subset = config.get("subset_to_analyse")
     distance_metric = config.get("distance_metric")
     clustering_model = config.get("clustering_model")
     # "distance_type": "euclidean"
 
-    all_binding_sites = extraction(folder_path)
-    if subset:
-        binding_sites = [site for site in all_binding_sites if subset in site['file']]
-    else:
-        binding_sites = all_binding_sites
-    
-    distance_matrix = pairwise_distances_with_library(binding_sites, distance_metric)
-    labels = perform_clustering(distance_matrix, clustering_model)
-    mapping(binding_sites, labels)
+    global all_target_data
 
+    all_binding_sites, all_target_data = extraction(folder_path)
+    print("Extraction completed")
+    binding_sites = all_binding_sites[:subset]
+
+    
+    def calculate_distance_matrix(binding_sites, distance_metric):
+        """Calculate the pairwise distance matrix based on the specified distance metric."""
+        if distance_metric == 'residue_overlap':
+            return pairwise_distances_with_library(binding_sites, residue_overlap_distance )
+        elif distance_metric == 'residue_score':
+            return pairwise_distances_with_library(binding_sites, residue_score_distance)
+        elif distance_metric == 'distance_vector':
+            return pairwise_distances_with_library(binding_sites, distance_vector)
+        else:
+            raise ValueError(f"Unsupported distance metric: {distance_metric}")
+
+    distance_matrix = calculate_distance_matrix(binding_sites, distance_metric)
+    print(f"Distance matrix calculated using {distance_metric}")
+    labels = perform_clustering(distance_matrix, clustering_model)
+    print(f"Clustering done using: {clustering_model}")
+    mapping(binding_sites, labels)
 
 
 
