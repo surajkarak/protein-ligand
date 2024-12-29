@@ -87,18 +87,18 @@ def residue_overlap_distance(site1, site2, norm_by):
     # return 1 - len(residues1 & residues2) / len(residues1 | residues2)
 
 def pairwise_distances_with_library(sites, distance_func, norm_by):
-    def distance_wrapper(i, j):
+    def distance_wrapper(i, j, norm_by):
         return distance_func(sites[int(i[0])], sites[int(j[0])], norm_by)
     
     indices = list(range(len(sites)))
-    condensed_matrix = pdist([[i] for i in indices], metric=lambda i, j: distance_wrapper(i, j))
+    condensed_matrix = pdist([[i] for i in indices], metric=lambda i, j: distance_wrapper(i, j, norm_by))
     
     return squareform(condensed_matrix)
 
 
 # Based on residue scores
 
-def residue_score_distance(site1, site2):
+def residue_score_distance(site1, site2, distancetype ):
     res_scores_1 = site1["site"].get('residue_scores', {})
     res_scores_2 = site2["site"].get('residue_scores', {})
     rnames = list(set.union(set(res_scores_1.keys()), set(res_scores_2.keys())))
@@ -106,18 +106,18 @@ def residue_score_distance(site1, site2):
     res_scores_2 = {**dict.fromkeys(rnames, 0), **res_scores_2}
     res_scores_1 = np.asarray(list(res_scores_1.values()), np.float32)
     res_scores_2 = np.asarray(list(res_scores_2.values()), np.float32)
-    dist = np.sqrt(np.sum((res_scores_1 - res_scores_2) ** 2))
+    # dist = np.sqrt(np.sum((res_scores_1 - res_scores_2) ** 2))
 
-    # if distancetype == "euclidean":
-    #     dist = np.sqrt(np.sum((res_scores_1 - res_scores_2) ** 2))
-    #     sim = 1 - dist
-    # if distancetype =="L1":
-    #     dist = np.sum(np.abs(res_scores_1 - res_scores_2))
-    # if distancetype =="Jaccard":
-    #     min_sum = np.sum(np.minimum(res_scores_1, res_scores_2))
-    #     max_sum = np.sum(np.maximum(res_scores_1, res_scores_2))
-    #     sim = min_sum / max_sum
-    #     dist = 1 - sim
+    if distancetype == "euclidean":
+        dist = np.sqrt(np.sum((res_scores_1 - res_scores_2) ** 2))
+        sim = 1 - dist
+    if distancetype =="L1":
+        dist = np.sum(np.abs(res_scores_1 - res_scores_2))
+    if distancetype =="Jaccard":
+        min_sum = np.sum(np.minimum(res_scores_1, res_scores_2))
+        max_sum = np.sum(np.maximum(res_scores_1, res_scores_2))
+        sim = min_sum / max_sum
+        dist = 1 - sim
     
     return dist
 
@@ -171,14 +171,20 @@ def hotspot_to_residue(binding_site_entry):
     vectors = 1 - np.clip(min_distances / max_dist, 0, 1)
     return vectors
 
-def distance_vector(site1, site2):
+def distance_vector(site1, site2, distancetype):
     d1 = hotspot_to_residue(site1)
     d2 = hotspot_to_residue(site2)
     max_length = max(len(d1), len(d2))
     vector1_padded = np.pad(d1, (0, max_length - len(d1)), mode='constant')
     vector2_padded = np.pad(d2, (0, max_length - len(d2)), mode='constant')
 
-    distance = np.linalg.norm(vector1_padded - vector2_padded)
+    if distancetype == "euclidean":
+        distance = np.linalg.norm(vector1_padded - vector2_padded)
+        # sim = 1 - dist
+    if distancetype =="L1":
+        distance = np.linalg.norm(vector1_padded - vector2_padded, ord=1)
+
+
     return distance
 
 
