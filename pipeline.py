@@ -86,19 +86,10 @@ def residue_overlap_distance(site1, site2, norm_by):
     # # Jaccard distance = 1 - Jaccard similarity
     # return 1 - len(residues1 & residues2) / len(residues1 | residues2)
 
-def pairwise_distances_with_library(sites, distance_func, norm_by):
-    def distance_wrapper(i, j, norm_by):
-        return distance_func(sites[int(i[0])], sites[int(j[0])], norm_by)
-    
-    indices = list(range(len(sites)))
-    condensed_matrix = pdist([[i] for i in indices], metric=lambda i, j: distance_wrapper(i, j, norm_by))
-    
-    return squareform(condensed_matrix)
-
 
 # Based on residue scores
 
-def residue_score_distance(site1, site2, distancetype ):
+def residue_score_distance(site1, site2, distancetype):
     res_scores_1 = site1["site"].get('residue_scores', {})
     res_scores_2 = site2["site"].get('residue_scores', {})
     rnames = list(set.union(set(res_scores_1.keys()), set(res_scores_2.keys())))
@@ -111,9 +102,9 @@ def residue_score_distance(site1, site2, distancetype ):
     if distancetype == "euclidean":
         dist = np.sqrt(np.sum((res_scores_1 - res_scores_2) ** 2))
         sim = 1 - dist
-    if distancetype =="L1":
+    elif distancetype =="L1":
         dist = np.sum(np.abs(res_scores_1 - res_scores_2))
-    if distancetype =="Jaccard":
+    elif distancetype =="Jaccard":
         min_sum = np.sum(np.minimum(res_scores_1, res_scores_2))
         max_sum = np.sum(np.maximum(res_scores_1, res_scores_2))
         sim = min_sum / max_sum
@@ -181,9 +172,13 @@ def distance_vector(site1, site2, distancetype):
     if distancetype == "euclidean":
         distance = np.linalg.norm(vector1_padded - vector2_padded)
         # sim = 1 - dist
-    if distancetype =="L1":
+    elif distancetype =="L1":
         distance = np.linalg.norm(vector1_padded - vector2_padded, ord=1)
-
+    elif distancetype == "jaccard":
+        min_sum = np.sum(np.minimum(vector1_padded, vector2_padded))
+        max_sum = np.sum(np.maximum(vector1_padded, vector2_padded))
+        similarity = min_sum / max_sum if max_sum != 0 else 0  # Handle divide-by-zero
+        distance = 1 - similarity
 
     return distance
 
@@ -191,17 +186,30 @@ def distance_vector(site1, site2, distancetype):
 # subset = all_binding_sites[:100]  # First 100 sites
 # distance_matrix = pairwise_distances_with_library(subset, distance_vector)
 
-
+def pairwise_distances_with_library(sites, distance_func, distance_type):
+    def distance_wrapper(i, j, distance_type):
+        return distance_func(sites[int(i[0])], sites[int(j[0])], distance_type)
     
+    indices = list(range(len(sites)))
+    condensed_matrix = pdist([[i] for i in indices], metric=lambda i, j: distance_wrapper(i, j, distance_type))
+    
+    return squareform(condensed_matrix)
 
 # Step 2: Clustering
 
-def perform_clustering(distance_matrix, clustering_model):
+def perform_clustering(distance_matrix, clustering_args):
     """Perform clustering based on the specified clustering model."""
+
+    clustering_model = clustering_args.get("type")
+    clustering_params = clustering_args.get("parameters")
+
     if clustering_model == 'agglomerative':
-        linkage_matrix = linkage(squareform(distance_matrix), method='average')
-        clusters = fcluster(linkage_matrix, t=0.5, criterion='distance')
-        agglom_model = AgglomerativeClustering(n_clusters=len(clusters), metric='precomputed', linkage='average')
+        linkage_method = clustering_params.get("method")
+        linkage_matrix = linkage(squareform(distance_matrix), method= linkage_method)
+        fcluster_threshold = clustering_params.get("threshold")
+        fcluster_criterion = clustering_params.get("criterion")
+        clusters = fcluster(linkage_matrix, t=fcluster_threshold, criterion=fcluster_criterion)
+        agglom_model = AgglomerativeClustering(n_clusters=len(clusters), metric='precomputed', linkage=linkage_method)
         cluster_labels = agglom_model.fit_predict(distance_matrix)
         return cluster_labels
     elif clustering_model == 'meanshift':
@@ -209,11 +217,16 @@ def perform_clustering(distance_matrix, clustering_model):
         mean_shift_labels = mean_shift.fit_predict(distance_matrix)
         return mean_shift_labels
     elif clustering_model == 'dbscan':
-        dbscan = DBSCAN(metric='precomputed', eps=0.5, min_samples=2)
+        epsilon = clustering_params.get("eps")
+        minimum_samples = clustering_params.get("min_samples")
+        dbscan = DBSCAN(metric='precomputed', eps=epsilon, min_samples=minimum_samples)
         dbscan_labels = dbscan.fit_predict(distance_matrix)
         return dbscan_labels
     elif clustering_model == 'optics':
-        optics = OPTICS(metric='precomputed', min_samples=5, xi=0.05, min_cluster_size=0.1)
+        minimum_samples = clustering_params.get("min_samples")
+        xi = clustering_params.get("xi")
+        minimum_cluster_size = clustering_params.get("min_cluster_size")
+        optics = OPTICS(metric='precomputed', min_samples=5, xi=xi, min_cluster_size=minimum_cluster_size)
         optics_labels = optics.fit_predict(distance_matrix)
         return optics_labels
     else:
@@ -255,9 +268,11 @@ def cluster(json_path):
 
     folder_path =  config.get("path_to_pkl_files") 
     subset = config.get("subset_to_analyse")
-    distance_metric = config.get("distance_metric")
-    clustering_model = config.get("clustering_model")
-    # "distance_type": "euclidean"
+    distance_args = config.get("distance_metric")
+    distance_metric = distance_args.get("metric_type")
+    distance_type = distance_args.get("distance_type")  
+    clustering_args = config.get("clustering_model")
+
 
     global all_target_data
 
@@ -266,21 +281,21 @@ def cluster(json_path):
     binding_sites = all_binding_sites[:subset]
 
     
-    def calculate_distance_matrix(binding_sites, distance_metric):
+    def calculate_distance_matrix(binding_sites, distance_metric, distance_type):
         """Calculate the pairwise distance matrix based on the specified distance metric."""
         if distance_metric == 'residue_overlap':
-            return pairwise_distances_with_library(binding_sites, residue_overlap_distance )
+            return pairwise_distances_with_library(binding_sites, residue_overlap_distance, distance_type)
         elif distance_metric == 'residue_score':
-            return pairwise_distances_with_library(binding_sites, residue_score_distance)
+            return pairwise_distances_with_library(binding_sites, residue_score_distance, distance_type)
         elif distance_metric == 'distance_vector':
-            return pairwise_distances_with_library(binding_sites, distance_vector)
+            return pairwise_distances_with_library(binding_sites, distance_vector, distance_type)
         else:
             raise ValueError(f"Unsupported distance metric: {distance_metric}")
 
-    distance_matrix = calculate_distance_matrix(binding_sites, distance_metric)
+    distance_matrix = calculate_distance_matrix(binding_sites, distance_metric, distance_type)
     print(f"Distance matrix calculated using {distance_metric}")
-    labels = perform_clustering(distance_matrix, clustering_model)
-    print(f"Clustering done using: {clustering_model}")
+    labels = perform_clustering(distance_matrix, clustering_args)
+    print(f"Clustering done using: {clustering_args.get("type")}")
     mapping(binding_sites, labels)
 
 
