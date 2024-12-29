@@ -107,7 +107,7 @@ def residue_score_distance(site1, site2, distancetype):
     elif distancetype =="Jaccard":
         min_sum = np.sum(np.minimum(res_scores_1, res_scores_2))
         max_sum = np.sum(np.maximum(res_scores_1, res_scores_2))
-        sim = min_sum / max_sum
+        sim = min_sum / max_sum if max_sum != 0 else 0
         dist = 1 - sim
     
     return dist
@@ -203,7 +203,8 @@ def perform_clustering(distance_matrix, clustering_args):
     clustering_model = clustering_args.get("type")
     clustering_params = clustering_args.get("parameters")
 
-    if clustering_model == 'agglomerative':
+    #Agglomerative 
+    def agglomerative(distance_matrix, clustering_params):
         linkage_method = clustering_params.get("method")
         linkage_matrix = linkage(squareform(distance_matrix), method= linkage_method)
         fcluster_threshold = clustering_params.get("threshold")
@@ -211,23 +212,82 @@ def perform_clustering(distance_matrix, clustering_args):
         clusters = fcluster(linkage_matrix, t=fcluster_threshold, criterion=fcluster_criterion)
         agglom_model = AgglomerativeClustering(n_clusters=len(clusters), metric='precomputed', linkage=linkage_method)
         cluster_labels = agglom_model.fit_predict(distance_matrix)
+        embedding = TSNE(n_components=2, metric='precomputed', init='random').fit_transform(distance_matrix)
+        plt.figure(figsize=(10, 6))
+        for cluster_id in np.unique(cluster_labels):
+            cluster_points = embedding[cluster_labels == cluster_id]
+            plt.scatter(cluster_points[:, 0], cluster_points[:, 1], label=f'Cluster {cluster_id}', s=50)
+        plt.title('Clusters Visualized Using t-SNE')
+        plt.xlabel('t-SNE Dimension 1')
+        plt.ylabel('t-SNE Dimension 2')
+        plt.legend()
+        plt.show()
         return cluster_labels
-    elif clustering_model == 'meanshift':
+    
+    # Meanshift
+    def mean_shift(distance_matrix):
         mean_shift = MeanShift()
         mean_shift_labels = mean_shift.fit_predict(distance_matrix)
+        embedding = TSNE(n_components=2, metric='precomputed', init='random').fit_transform(distance_matrix)
+        plt.figure(figsize=(10, 6))
+        for cluster_id in np.unique(mean_shift_labels):
+            cluster_points = embedding[mean_shift_labels == cluster_id]
+            plt.scatter(cluster_points[:, 0], cluster_points[:, 1], label=f'Cluster {cluster_id}', s=50)
+
+        plt.title('Clusters Visualized Using t-SNE')
+        plt.xlabel('t-SNE Dimension 1')
+        plt.ylabel('t-SNE Dimension 2')
+        plt.legend()
+        plt.show()
         return mean_shift_labels
-    elif clustering_model == 'dbscan':
+    
+    # DBSCAN
+    def dbscan(distance_matrix, clustering_params):
         epsilon = clustering_params.get("eps")
         minimum_samples = clustering_params.get("min_samples")
         dbscan = DBSCAN(metric='precomputed', eps=epsilon, min_samples=minimum_samples)
         dbscan_labels = dbscan.fit_predict(distance_matrix)
+        embedding = TSNE(n_components=2, metric='precomputed', init='random').fit_transform(distance_matrix)
+        embedding = TSNE(n_components=2, metric='precomputed', init='random').fit_transform(distance_matrix)
+        # Scatter plot
+        plt.figure(figsize=(8, 6))
+        for cluster in set(dbscan_labels):
+            cluster_points = embedding[dbscan_labels == cluster]
+            plt.scatter(cluster_points[:, 0], cluster_points[:, 1], label=f'Cluster {cluster}')
+        plt.title('Binding Site Clusters (t-SNE)')
+        plt.legend()
+        plt.show()
         return dbscan_labels
-    elif clustering_model == 'optics':
+
+    # OPTICS
+    def optics(distance_matrix, clustering_params):
         minimum_samples = clustering_params.get("min_samples")
         xi = clustering_params.get("xi")
         minimum_cluster_size = clustering_params.get("min_cluster_size")
         optics = OPTICS(metric='precomputed', min_samples=5, xi=xi, min_cluster_size=minimum_cluster_size)
         optics_labels = optics.fit_predict(distance_matrix)
+        embedding = TSNE(n_components=2, metric='precomputed', init='random').fit_transform(distance_matrix)
+        # Scatter plot
+        plt.figure(figsize=(8, 6))
+        for cluster in set(optics_labels):
+            cluster_points = embedding[optics_labels == cluster]
+            plt.scatter(cluster_points[:, 0], cluster_points[:, 1], label=f'Cluster {cluster}')
+        plt.title('Binding Site Clusters (t-SNE)')
+        plt.legend()
+        plt.show()
+        return optics_labels
+
+    if clustering_model == 'agglomerative':
+        cluster_labels = agglomerative(distance_matrix, clustering_params)
+        return cluster_labels        
+    elif clustering_model == 'meanshift':
+        mean_shift_labels = mean_shift(distance_matrix)
+        return mean_shift_labels
+    elif clustering_model == 'dbscan':
+        dbscan_labels = dbscan(distance_matrix, clustering_params)
+        return dbscan_labels
+    elif clustering_model == 'optics':
+        optics_labels = optics(distance_matrix, clustering_params)
         return optics_labels
     else:
         raise ValueError(f"Unsupported clustering model: {clustering_model}")
@@ -246,7 +306,7 @@ def mapping(subset, labels):
     with open(output_file, "w") as f:
         json.dump(subset_with_labels, f, indent=4)
 
-    print(f"Binging sites with cluster labels saved to {output_file}")
+    print(f"Binding sites with cluster labels saved to {output_file}")
 
 
 
@@ -266,13 +326,14 @@ def cluster(json_path):
     with open(json_path, 'r') as file:
         config = json.load(file)
 
+    global subset
     folder_path =  config.get("path_to_pkl_files") 
     subset = config.get("subset_to_analyse")
     distance_args = config.get("distance_metric")
     distance_metric = distance_args.get("metric_type")
     distance_type = distance_args.get("distance_type")  
     clustering_args = config.get("clustering_model")
-
+    clustering_model = clustering_args.get("type")
 
     global all_target_data
 
@@ -295,7 +356,7 @@ def cluster(json_path):
     distance_matrix = calculate_distance_matrix(binding_sites, distance_metric, distance_type)
     print(f"Distance matrix calculated using {distance_metric}")
     labels = perform_clustering(distance_matrix, clustering_args)
-    print(f"Clustering done using: {clustering_args.get("type")}")
+    print(f"Clustering done using: {clustering_model}")
     mapping(binding_sites, labels)
 
 
