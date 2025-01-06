@@ -192,10 +192,7 @@ def get_atoms_in_binding_site(binding_site):
 def atoms_of_interest(binding_sites):
     atoms_of_interest = []
     for site in binding_sites:
-        file_name = site['file']
-        target_data = [entry for entry in all_target_data if entry['file'] in file_name]
-        target_entry = next((entry for entry in target_data if entry['file'] == file_name), None)
-        atoms = get_atoms_in_binding_site(site, target_entry) 
+        atoms = get_atoms_in_binding_site(site) 
         atoms_of_interest.append(atoms)
     all_atoms = [
         f"{atom['chain_id']}_{atom['res_id']}_{atom['res_name']}_{atom['atom_name']}" 
@@ -204,7 +201,7 @@ def atoms_of_interest(binding_sites):
         ]
     unique_atoms = set(all_atoms)
     atoms_of_interest_flat = [atom for atoms in atoms_of_interest for atom in atoms]
-
+    print("Set of atoms of interest created (Distance Vector Method)") 
     return unique_atoms, atoms_of_interest_flat 
 
 def get_atom_coordinates(atom_data):
