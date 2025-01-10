@@ -19,7 +19,7 @@ from sklearn.cluster import MeanShift
 from sklearn.cluster import OPTICS
 from sklearn.cluster import DBSCAN
 from sklearn.manifold import TSNE
-
+from ordered_set import OrderedSet
 
 
 # folder_path = '/Users/surajkwork/Documents/Projects/ProteinLigand/protein-ligand/protein-ligand/BindingSiteAnalysis/kras_md_sites_1'   
@@ -138,7 +138,7 @@ def residue_score_distance(site1, site2, distancetype):
 #             residue_coords.append(coord)
 #     return np.array(residue_coords)
 
-def get_atoms_in_binding_site(binding_site):
+def get_atoms_in_binding_site(binding_site): #helper function to get atoms within a binding site
     """
     Extract atoms that belong to the residues in a given binding site.
 
@@ -149,19 +149,19 @@ def get_atoms_in_binding_site(binding_site):
     Returns:
     - List of atoms with their details for the binding site.
     """
-    # Extract residues from the binding site
+
     file_name = binding_site['file']
     target= [entry for entry in all_target_data if entry['file'] in file_name]
     target_data = next((entry for entry in target if entry['file'] == file_name), None)
     binding_site_residues = binding_site['site']['residues']
 
-    # Parse residue IDs and names from the binding site
+
     parsed_residues = []
     for residue in binding_site_residues:
         chain_id, res_id, res_name = residue.split('_')
         parsed_residues.append((chain_id, int(res_id), res_name))
 
-    # Extract atom details from the target data
+    
     chain_ids = target_data['target']['chain_ids']
     res_ids = target_data['target']['res_ids']
     res_names = target_data['target']['res_names']
@@ -169,7 +169,6 @@ def get_atoms_in_binding_site(binding_site):
     coords = target_data['target']['coords']
     elements = target_data['target']['elements']
 
-    # Filter atoms for the residues in the binding site
     atoms_in_site = []
     for chain_id, res_id, res_name in parsed_residues:
         # Find indices matching the residue
@@ -199,21 +198,13 @@ def atoms_of_interest(binding_sites):
         for atom_list in atoms_of_interest 
         for atom in atom_list
         ]
-    unique_atoms = set(all_atoms)
+    unique_atoms = OrderedSet(all_atoms)
     atoms_of_interest_flat = [atom for atoms in atoms_of_interest for atom in atoms]
     print("Set of atoms of interest created (Distance Vector Method)") 
     return unique_atoms, atoms_of_interest_flat 
 
 def get_atom_coordinates(atom_data):
-    """
-    Helper function to extract the coordinates of an atom.
-
-    Parameters:
-        atom_data (list): A list containing atom information, e.g., ['A', '14', 'GLY', 'N'].
-
-    Returns:
-        list: The coordinates of the atom as [x, y, z].
-    """
+   
     chain_id, res_id, res_name, atom_name = atom_data
     for entry in atoms_of_interest_flat:  # Assuming this contains atom data dictionaries
         if (
@@ -274,7 +265,7 @@ def binding_site_vector(binding_site, unique_atoms):
 
     # Calculate the binding site vector as the minimum distance across all hotspots for each atom
     binding_site_vector = [
-        min(hotspot_vector[atom] for hotspot_vector in hotspot_vectors) for atom in unique_atoms
+        min(hotspot_vector[atom] for hotspot_vector in hotspot_vectors) for atom in unique_atoms # Ordered set in python. To check.
     ]
 
     return binding_site_vector
