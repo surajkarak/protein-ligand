@@ -22,11 +22,7 @@ from sklearn.manifold import TSNE
 from ordered_set import OrderedSet
 
 
-# folder_path = '/Users/surajkwork/Documents/Projects/ProteinLigand/protein-ligand/protein-ligand/BindingSiteAnalysis/kras_md_sites_1'   
-# all_binding_sites = []
-
-
-def extraction(folder_path):
+def extraction(folder_path): # Function to extract all arguments - including folder with pkl files, distance and clustering parameters
     all_binding_sites = []
     all_target_data = []
 
@@ -40,17 +36,16 @@ def extraction(folder_path):
                 
                 sites = data.get('sites', [])
                 for site in sites:
-                    all_binding_sites.append({'file': file_name, 'site': site})  
+                    all_binding_sites.append({'file': file_name, 'site': site})  # extra check to track the pkl file because each file can have multiple binding sites
             
                 target = data.get('target', {})
                 if target:
-                    all_target_data.append({'file': file_name, 'target': target}) 
+                    all_target_data.append({'file': file_name, 'target': target})  # extra check so we can track the atom data (coordinates) we get are for residues in that file
             
             except Exception as e:
                 print(f"Error loading {file_name}: {e}")
 
     return all_binding_sites, all_target_data
-    # print(f"Total target data entries extracted: {len(all_target_data)}")
 
 
 # Step 1: Distance/similarity calculation
@@ -83,9 +78,6 @@ def residue_overlap_distance(site1, site2, norm_by):
     dist = 1 - sim
     return dist
 
-    # # Jaccard distance = 1 - Jaccard similarity
-    # return 1 - len(residues1 & residues2) / len(residues1 | residues2)
-
 
 # Based on residue scores
 
@@ -97,7 +89,6 @@ def residue_score_distance(site1, site2, distancetype):
     res_scores_2 = {**dict.fromkeys(rnames, 0), **res_scores_2}
     res_scores_1 = np.asarray(list(res_scores_1.values()), np.float32)
     res_scores_2 = np.asarray(list(res_scores_2.values()), np.float32)
-    # dist = np.sqrt(np.sum((res_scores_1 - res_scores_2) ** 2))
 
     if distancetype == "euclidean":
         dist = np.sqrt(np.sum((res_scores_1 - res_scores_2) ** 2))
@@ -115,43 +106,10 @@ def residue_score_distance(site1, site2, distancetype):
 
 # Based on distance vectors
 
-# def distance_vectors(binding sites):
-
-# def get_residue_coordinates(binding_site, target_data):
-#     residues = binding_site.get('residues', [])
-#     target_residues = {
-#         (chain, res_id, res_name): coord 
-#         for chain, res_id, res_name, coord in zip(
-#             target_data.get('chain_ids', []),
-#             target_data.get('res_ids', []),
-#             target_data.get('res_names', []),
-#             target_data.get('coords', [])
-#         )
-#     }
-    
-#     # Extract coordinates for residues in the binding site
-#     residue_coords = []
-#     for residue in residues:
-#         chain_id, res_id, res_name = residue.split('_')  # Assuming residue is in "chain_resid_name" format
-#         coord = target_residues.get((chain_id, int(res_id), res_name))
-#         if coord is not None:
-#             residue_coords.append(coord)
-#     return np.array(residue_coords)
 
 def get_atoms_in_binding_site(binding_site): #helper function to get atoms within a binding site
-    """
-    Extract atoms that belong to the residues in a given binding site.
-
-    Parameters:
-    - binding_site: dict, a single binding site from all_binding_sites.
-    - target_data: dict, the corresponding target data from all_target_data.
-
-    Returns:
-    - List of atoms with their details for the binding site.
-    """
-
-    file_name = binding_site['file']
-    target= [entry for entry in all_target_data if entry['file'] in file_name]
+    file_name = binding_site['file'] 
+    target= [entry for entry in all_target_data if entry['file'] in file_name] # extra check to make sure that the atoms are from the residues in the same pkl file 
     target_data = next((entry for entry in target if entry['file'] == file_name), None)
     binding_site_residues = binding_site['site']['residues']
 
@@ -188,7 +146,7 @@ def get_atoms_in_binding_site(binding_site): #helper function to get atoms withi
 
     return atoms_in_site
 
-def atoms_of_interest(binding_sites):
+def atoms_of_interest(binding_sites): #helper function to list all unique atoms from all binding sites in all files. The variables are global
     atoms_of_interest = []
     for site in binding_sites:
         atoms = get_atoms_in_binding_site(site) 
@@ -198,15 +156,15 @@ def atoms_of_interest(binding_sites):
         for atom_list in atoms_of_interest 
         for atom in atom_list
         ]
-    unique_atoms = OrderedSet(all_atoms)
-    atoms_of_interest_flat = [atom for atoms in atoms_of_interest for atom in atoms]
+    unique_atoms = OrderedSet(all_atoms) # Ordered set to maintain order in the calculation of the hotspot distances to atoms and binding vector for each site
+    atoms_of_interest_flat = [atom for atoms in atoms_of_interest for atom in atoms]  # atoms_of_interest_flat has to be a dictionary
     print("Set of atoms of interest created (Distance Vector Method)") 
     return unique_atoms, atoms_of_interest_flat 
 
-def get_atom_coordinates(atom_data):
+def get_atom_coordinates(atom_data): # Helper function go get coordinates for atom specified
    
     chain_id, res_id, res_name, atom_name = atom_data
-    for entry in atoms_of_interest_flat:  # Assuming this contains atom data dictionaries
+    for entry in atoms_of_interest_flat:  # atoms_of_interest_flat has to be global and in a dictionary format
         if (
             entry['chain_id'] == chain_id and
             entry['res_id'] == int(res_id) and
@@ -218,29 +176,28 @@ def get_atom_coordinates(atom_data):
 
 def binding_site_vector(binding_site, unique_atoms):
     """
-    Calculate the vector for a binding site based on the distances between hotspots and unique atoms.
+    helper function to calculate the vector for a binding site based on the distances between hotspots and unique atoms.
 
     Parameters:
         binding_site (dict): The binding site data containing hotspots and residues.
-        unique_atoms (set): A set of unique atom identifiers.
+        unique_atoms (set): set of ordered list of unique atoms from all sites
 
     Returns:
-        list: The binding site vector with minimum distances to hotspots for each atom.
+        list: The binding site vector for that binding site with minimum distances to hotspots for each atom.
     """
-    # Initialize a dummy vector for all unique atoms with a large default value (e.g., 10.0)
+    # Initialize a dummy vector for all unique atoms with a large default value (e.g., 10.0) to keep vector lengths same, i.e. equal to length of unique atoms
     dummy_vector = {atom: 10.0 for atom in unique_atoms}
 
-    # Get the set of residues in the current binding site
     residues_in_site = set(binding_site['site']['residues'])  # Example: ['A_14_GLY', 'A_15_VAL', ...]
 
-    # Map residues to atoms using atoms_of_interest_flat
+    # Get atoms from residues 
     atoms_in_site = set(
         f"{atom['chain_id']}_{atom['res_id']}_{atom['res_name']}_{atom['atom_name']}"
         for atom in atoms_of_interest_flat
         if f"{atom['chain_id']}_{atom['res_id']}_{atom['res_name']}" in residues_in_site
     )
 
-    # Create a list to hold all hotspot vectors
+    # list to hold all hotspot vectors
     hotspot_vectors = []
 
     # Iterate through each hotspot in the binding site
@@ -250,22 +207,17 @@ def binding_site_vector(binding_site, unique_atoms):
 
         # Iterate through atoms in the binding site that are also in unique_atoms
         for atom in unique_atoms.intersection(atoms_in_site):
-            # Extract the atom's details and coordinates
             atom_data = atom.split('_')
-            atom_coords = get_atom_coordinates(atom_data)  # Define this helper function to fetch atom coords
-
-            # Calculate the Euclidean distance between the hotspot and the atom
+            atom_coords = get_atom_coordinates(atom_data)  
             distance = np.linalg.norm(np.array(hotspot_coords) - np.array(atom_coords))
-
-            # Update the hotspot vector with the calculated distance
-            hotspot_vector[atom] = distance
+            hotspot_vector[atom] = distance # updates the distance for only that element of the hotspot vector where the id matches this particular atom
 
         # Add the hotspot vector to the list of vectors
         hotspot_vectors.append(hotspot_vector)
 
     # Calculate the binding site vector as the minimum distance across all hotspots for each atom
     binding_site_vector = [
-        min(hotspot_vector[atom] for hotspot_vector in hotspot_vectors) for atom in unique_atoms # Ordered set in python. To check.
+        min(hotspot_vector[atom] for hotspot_vector in hotspot_vectors) for atom in unique_atoms 
     ]
 
     return binding_site_vector
@@ -277,7 +229,6 @@ def distance_between_vectors(binding_site_1, binding_site_2, distancetype):
 
     if distancetype == "euclidean":
         distance = np.linalg.norm(np.array(binding_site_vector1) - np.array(binding_site_vector2))
-        # sim = 1 - dist
     elif distancetype =="L1":
         distance = np.linalg.norm(np.array(binding_site_vector1) - np.array(binding_site_vector2), ord=1)
     elif distancetype == "jaccard":
@@ -289,10 +240,12 @@ def distance_between_vectors(binding_site_1, binding_site_2, distancetype):
     return distance
 
 
-# subset = all_binding_sites[:100]  # First 100 sites
-# distance_matrix = pairwise_distances_with_library(subset, distance_vector)
-
-def pairwise_distances_with_library(sites, distance_func, distance_type):
+def pairwise_distances_with_library(sites, distance_func, distance_type): 
+    """ helper function to calculate pairwise disance between sites.
+    works for all distance functions - residue overlap, residue score and distance vector.
+    Note that the distance_type translates to "norm_by" in the case of residue_overlap but it functions in the same way as the others (euclidean v l2 v jaccard)
+    
+    """
     def distance_wrapper(i, j, distance_type):
         return distance_func(sites[int(i[0])], sites[int(j[0])], distance_type)
     
@@ -304,8 +257,10 @@ def pairwise_distances_with_library(sites, distance_func, distance_type):
 # Step 2: Clustering
 
 def perform_clustering(distance_matrix, clustering_args):
-    """Perform clustering based on the specified clustering model."""
-
+    """
+    general helper function to do clustering depending on clustering args.
+    returns cluster labels and plot visualisation in 2D t-sne
+    """
     clustering_model = clustering_args.get("type")
     clustering_params = clustering_args.get("parameters")
 
@@ -318,12 +273,14 @@ def perform_clustering(distance_matrix, clustering_args):
         clusters = fcluster(linkage_matrix, t=fcluster_threshold, criterion=fcluster_criterion)
         agglom_model = AgglomerativeClustering(n_clusters=len(clusters), metric='precomputed', linkage=linkage_method)
         cluster_labels = agglom_model.fit_predict(distance_matrix)
+        
+        # for plotting tsne visualisation in 2D
         embedding = TSNE(n_components=2, metric='precomputed', init='random').fit_transform(distance_matrix)
         plt.figure(figsize=(10, 6))
         for cluster_id in np.unique(cluster_labels):
             cluster_points = embedding[cluster_labels == cluster_id]
             plt.scatter(cluster_points[:, 0], cluster_points[:, 1], label=f'Cluster {cluster_id}', s=50)
-        plt.title('Clusters Visualized Using t-SNE')
+        plt.title('Clusters (Agglomerative) visualized Using t-SNE')
         plt.xlabel('t-SNE Dimension 1')
         plt.ylabel('t-SNE Dimension 2')
         plt.legend()
@@ -334,13 +291,14 @@ def perform_clustering(distance_matrix, clustering_args):
     def mean_shift(distance_matrix):
         mean_shift = MeanShift()
         mean_shift_labels = mean_shift.fit_predict(distance_matrix)
+        # for plotting tsne visualisation in 2D
         embedding = TSNE(n_components=2, metric='precomputed', init='random').fit_transform(distance_matrix)
         plt.figure(figsize=(10, 6))
         for cluster_id in np.unique(mean_shift_labels):
             cluster_points = embedding[mean_shift_labels == cluster_id]
             plt.scatter(cluster_points[:, 0], cluster_points[:, 1], label=f'Cluster {cluster_id}', s=50)
 
-        plt.title('Clusters Visualized Using t-SNE')
+        plt.title('Clusters (MeanShift) visualized Using t-SNE')
         plt.xlabel('t-SNE Dimension 1')
         plt.ylabel('t-SNE Dimension 2')
         plt.legend()
@@ -353,14 +311,13 @@ def perform_clustering(distance_matrix, clustering_args):
         minimum_samples = clustering_params.get("min_samples")
         dbscan = DBSCAN(metric='precomputed', eps=epsilon, min_samples=minimum_samples)
         dbscan_labels = dbscan.fit_predict(distance_matrix)
+        # for plotting tsne visualisation in 2D
         embedding = TSNE(n_components=2, metric='precomputed', init='random').fit_transform(distance_matrix)
-        embedding = TSNE(n_components=2, metric='precomputed', init='random').fit_transform(distance_matrix)
-        # Scatter plot
         plt.figure(figsize=(8, 6))
         for cluster in set(dbscan_labels):
             cluster_points = embedding[dbscan_labels == cluster]
             plt.scatter(cluster_points[:, 0], cluster_points[:, 1], label=f'Cluster {cluster}')
-        plt.title('Binding Site Clusters (t-SNE)')
+        plt.title('Binding Site Clusters using DBSCAN (t-SNE)')
         plt.legend()
         plt.show()
         return dbscan_labels
@@ -372,13 +329,13 @@ def perform_clustering(distance_matrix, clustering_args):
         minimum_cluster_size = clustering_params.get("min_cluster_size")
         optics = OPTICS(metric='precomputed', min_samples=5, xi=xi, min_cluster_size=minimum_cluster_size)
         optics_labels = optics.fit_predict(distance_matrix)
+        # for plotting tsne visualisation in 2D
         embedding = TSNE(n_components=2, metric='precomputed', init='random').fit_transform(distance_matrix)
-        # Scatter plot
         plt.figure(figsize=(8, 6))
         for cluster in set(optics_labels):
             cluster_points = embedding[optics_labels == cluster]
             plt.scatter(cluster_points[:, 0], cluster_points[:, 1], label=f'Cluster {cluster}')
-        plt.title('Binding Site Clusters (t-SNE)')
+        plt.title('Binding Site Clusters using OPTICS (t-SNE)')
         plt.legend()
         plt.show()
         return optics_labels
@@ -420,7 +377,7 @@ def mapping(subset, labels):
 def cluster(json_path):
     """
     Main core function to execute the clustering
-    $ python viz.py --folder_path /Users/surajkwork/Documents/Projects/ProteinLigand/path_to_json
+    E.g. $ python viz.py --folder_path /path/to/clustering/arguments/j_son/file/path_to_clustering.json
 
     """
     # Get attributes from JSON file
